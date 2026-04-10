@@ -1,21 +1,19 @@
-#!/usr/bin/env python
+#!/opt/zabbix-telegram/.venv/bin/python
 # coding: utf-8
 
+from typing import Any
 import sys
 import os
-import time
 import random
 import string
-import requests
 import json
 import re
 import stat
 import hashlib
 import subprocess
-#import sqlite3
-from os.path import dirname
 import zbxtg_settings
-
+import httpx
+from urllib.parse import quote
 
 class Cache:
     def __init__(self, database):
@@ -26,30 +24,29 @@ class Cache:
 
 
 class TelegramAPI:
+    client: httpx.Client = httpx.Client(timeout=30, proxy=zbxtg_settings.proxy_to_tg)
     tg_url_bot_general = "https://api.telegram.org/bot"
-
     def http_get(self, url):
-        answer = requests.get(url, proxies=self.proxies)
+        answer = self.client.get(url)
         self.result = answer.json()
         self.ok_update()
         return self.result
 
-    def __init__(self, key):
+    def __init__(self):
         self.debug = False
-        self.key = key
-        self.proxies = {}
-        self.type = "private"  # 'private' for private chats or 'group' for group chats
+        self.key = zbxtg_settings.tg_key
+        self.type = "group"  # 'private' for private chats or 'group' for group chats
         self.markdown = False
         self.html = False
         self.disable_web_page_preview = False
         self.disable_notification = False
         self.reply_to_message_id = 0
-        self.tmp_dir = None
-        self.tmp_uids = None
+        self.tmp_dir: str = zbxtg_settings.zbx_tg_tmp_dir
+        self.tmp_uids: str = zbxtg_settings.zbx_tg_tmp_dir + "/" + "uids.txt"
         self.location = {"latitude": None, "longitude": None}
         self.update_offset = 0
         self.image_buttons = False
-        self.result = None
+        self.result: dict[str, Any] | None = None
         self.ok = None
         self.error = None
         self.get_updates_from_file = False
@@ -64,7 +61,7 @@ class TelegramAPI:
         params = {"offset": self.update_offset}
         if self.debug:
             print_message(url)
-        answer = requests.post(url, params=params, proxies=self.proxies)
+        answer = self.client.post(url, params=params)
         self.result = answer.json()
         if self.get_updates_from_file:
             print_message("Getting updated from file getUpdates.txt")
@@ -91,7 +88,7 @@ class TelegramAPI:
             print_message("Trying to /sendMessage:")
             print_message(url)
             print_message("post params: " + str(params))
-        answer = requests.post(url, params=params, proxies=self.proxies)
+        answer = self.client.post(url, params=params)
         if answer.status_code == 414:
             self.result = {"ok": False, "description": "414 URI Too Long"}
         else:
@@ -114,7 +111,7 @@ class TelegramAPI:
             print_message("Trying to /editMessageText:")
             print_message(url)
             print_message("post params: " + str(params))
-        answer = requests.post(url, params=params, proxies=self.proxies)
+        answer = self.client.post(url, params=params)
         self.result = answer.json()
         self.ok_update()
         return self.result
@@ -143,7 +140,7 @@ class TelegramAPI:
             print_message(url)
             print_message(params)
             print_message("files: " + str(files))
-        answer = requests.post(url, params=params, files=files, proxies=self.proxies)
+        answer = self.client.post(url, params=params, files=files)
         self.result = answer.json()
         self.ok_update()
         return self.result
@@ -167,7 +164,7 @@ class TelegramAPI:
             print_message(url)
             print_message(params)
             print_message("files: " + str(files))
-        answer = requests.post(url, params=params, files=files, proxies=self.proxies)
+        answer = self.client.post(url, params=params, files=files)
         self.result = answer.json()
         self.ok_update()
         return self.result
@@ -237,7 +234,7 @@ class TelegramAPI:
             print_message("Trying to /sendLocation:")
             print_message(url)
             print_message("post params: " + str(params))
-        answer = requests.post(url, params=params, proxies=self.proxies)
+        answer = self.client.post(url, params=params)
         self.result = answer.json()
         self.ok_update()
         return self.result
@@ -248,7 +245,7 @@ class TelegramAPI:
             params = {"callback_query_id": callback_query_id}
         else:
             params = {"callback_query_id": callback_query_id, "text": text}
-        answer = requests.post(url, params=params, proxies=self.proxies)
+        answer = self.client.post(url, params=params)
         self.result = answer.json()
         self.ok_update()
         return self.result
@@ -274,25 +271,19 @@ def markdown_fix(message, offset, emoji=False):
 
 
 class ZabbixWeb:
-    def __init__(self, server, username, password):
+    def __init__(self):
         self.debug = False
-        self.server = server
-        self.username = username
-        self.password = password
-        self.proxies = {}
-        self.verify = True
-        self.cookie = None
-        self.basic_auth_user = None
-        self.basic_auth_pass = None
-        self.tmp_dir = None
+        self.server = zbxtg_settings.zbx_server
+        self.username = zbxtg_settings.zbx_api_user
+        self.password = zbxtg_settings.zbx_api_pass
+        self.cookie: httpx.Cookies | None = None
+        self.tmp_dir = zbxtg_settings.zbx_tg_tmp_dir
+        self.basic_auth: httpx.BasicAuth = httpx.BasicAuth(username=zbxtg_settings.zbx_basic_auth_user, password=zbxtg_settings.zbx_basic_auth_pass)
+        self.zabbix_client: httpx.Client = httpx.Client(timeout=60, verify=False, auth=self.basic_auth)
 
     def login(self):
-        if not self.verify:
-            requests.packages.urllib3.disable_warnings()
-
         data_api = {"name": self.username, "password": self.password, "enter": "Sign in"}
-        answer = requests.post(self.server + "/", data=data_api, proxies=self.proxies, verify=self.verify,
-                               auth=requests.auth.HTTPBasicAuth(self.basic_auth_user, self.basic_auth_pass))
+        answer = self.zabbix_client.post(self.server + "/", data=data_api)
         cookie = answer.cookies
         if len(answer.history) > 1 and answer.history[0].status_code == 302:
             print_message("probably the server in your config file has not full URL (for example "
@@ -307,7 +298,7 @@ class ZabbixWeb:
         file_img = "{0}/{1}.png".format(self.tmp_dir,                                                   
                                         "".join(random.choice(string.ascii_letters) for e in range(10)))
 
-        title = requests.utils.quote(title)
+        title = quote(title)
 
         colors = {
             0: "00CC00",
@@ -338,8 +329,7 @@ class ZabbixWeb:
 
         if self.debug:
             print_message(zbx_img_url)
-        answer = requests.get(zbx_img_url, cookies=self.cookie, proxies=self.proxies, verify=self.verify,
-                              auth=requests.auth.HTTPBasicAuth(self.basic_auth_user, self.basic_auth_pass))
+        answer = self.zabbix_client.get(zbx_img_url, cookies=self.cookie)
         status_code = answer.status_code
         if status_code == 404:
             print_message("can't get image from '{0}'".format(zbx_img_url))
@@ -349,11 +339,10 @@ class ZabbixWeb:
         return file_img
 
     def api_test(self):
-        headers = {'Content-type': 'application/json'}
-        api_data = json.dumps({"jsonrpc": "2.0", "method": "user.login", "params":
-                              {"user": self.username, "password": self.password}, "id": 1})
+        api_data = {"jsonrpc": "2.0", "method": "user.login", "params":
+                              {"user": self.username, "password": self.password}, "id": 1}
         api_url = self.server + "/api_jsonrpc.php"
-        api = requests.post(api_url, data=api_data, proxies=self.proxies, headers=headers)
+        api = self.zabbix_client.post(api_url, json=api_data)
         return api.text
 
 
@@ -389,28 +378,6 @@ def list_cut(elements, symbols_limit):
         return elements_new, True
 
 
-class Maps:
-    # https://developers.google.com/maps/documentation/geocoding/intro
-    def __init__(self):
-        self.key = None
-        self.proxies = {}
-
-    def get_coordinates_by_address(self, address):
-        coordinates = {"latitude": 0, "longitude": 0}
-        url_api = "https://maps.googleapis.com/maps/api/geocode/json?key={0}&address={1}".format(self.key, address)
-        url = url_api
-        answer = requests.get(url, proxies=self.proxies)
-        result = answer.json()
-        try:
-            coordinates_dict = result["results"][0]["geometry"]["location"]
-        except:
-            if "error_message" in result:
-                print_message("[" + result["status"] + "]: " + result["error_message"])
-            return coordinates
-        coordinates = {"latitude": coordinates_dict["lat"], "longitude": coordinates_dict["lng"]}
-        return coordinates
-
-
 def file_write(filename, text):
     with open(filename, "w") as fd:
         fd.write(str(text))
@@ -435,13 +402,13 @@ def file_append(filename, text):
     return True
 
 
-def external_image_get(url, tmp_dir, timeout=6):
+def external_image_get(url: str, tmp_dir: str, timeout: int = 30):
     image_hash = hashlib.md5()
     image_hash.update(url.encode())
     file_img = tmp_dir + "/external_{0}.png".format(image_hash.hexdigest())
     try:
-        answer = requests.get(url, timeout=timeout, allow_redirects=True)
-    except requests.exceptions.ReadTimeout as ex:
+        answer = httpx.get(url, timeout=timeout, follow_redirects=True)
+    except httpx.RequestError:
         print_message("Can't get external image from '{0}': timeout".format(url))
         return False
     status_code = answer.status_code
@@ -457,7 +424,11 @@ def age2sec(age_str):
     age_sec = 0
     age_regex = "([0-9]+d)?\s?([0-9]+h)?\s?([0-9]+m)?"
     age_pattern = re.compile(age_regex)
-    intervals = age_pattern.match(age_str).groups()
+    match: re.Match[str] | None = age_pattern.match(age_str)
+    intervals = match.groups() if match else None
+    if not intervals:
+        return ""
+
     for i in intervals:
         if i:
             metric = i[-1]
@@ -472,24 +443,11 @@ def age2sec(age_str):
 
 def main():
 
-    tmp_dir = zbxtg_settings.zbx_tg_tmp_dir
-    if tmp_dir == "/tmp/" + zbxtg_settings.zbx_tg_prefix:
-        print_message("WARNING: it is strongly recommended to change `zbx_tg_tmp_dir` variable in config!!!")
-        print_message("https://github.com/ableev/Zabbix-in-Telegram/wiki/Change-zbx_tg_tmp_dir-in-settings")
-
-    tmp_cookie = tmp_dir + "/cookie.py.txt"
-    tmp_uids = tmp_dir + "/uids.txt"
     tmp_need_update = False  # do we need to update cache file with uids or not
-
-    rnd = random.randint(0, 999)
-    ts = time.time()
-    hash_ts = str(ts) + "." + str(rnd)
-
-    log_file = "/dev/null"
 
     args = sys.argv
 
-    settings = {
+    settings: dict[str, Any] = {
         "zbxtg_itemid": "0",  # itemid for graph
         "zbxtg_title": None,  # title for graph
         "zbxtg_image_period": None,
@@ -516,11 +474,6 @@ def main():
         "to_group": None,
         "forked": False,
     }
-
-    url_github = "https://github.com/ableev/Zabbix-in-Telegram"
-    url_wiki_base = "https://github.com/ableev/Zabbix-in-Telegram/wiki"
-    url_tg_group = "https://t.me/ZbxTg"
-    url_tg_channel = "https://t.me/Zabbix_in_Telegram"
 
     settings_description = {
         "itemid": {"name": "zbxtg_itemid", "type": "list",
@@ -567,23 +520,11 @@ def main():
 
     if len(args) < 4:
         do_not_exit = False
-        if "--features" in args:
-            print(("List of available settings, see {0}/Settings\n---".format(url_wiki_base)))
-            for sett, proprt in list(settings_description.items()):
-                print(("{0}: {1}\ndoc: {2}/{3}\n--".format(sett, proprt["help"], url_wiki_base, proprt["url"])))
-
-        elif "--show-settings" in args:
+        if "--show-settings" in args:
             do_not_exit = True
             print_message("Settings: " + str(json.dumps(settings, indent=2)))
-
         else:
-            print(("Hi. You should provide at least three arguments.\n"
-                   "zbxtg.py [TO] [SUBJECT] [BODY]\n\n"
-                  "1. Read main page and/or wiki: {0} + {1}\n"
-                  "2. Public Telegram group (discussion): {2}\n"
-                  "3. Public Telegram channel: {3}\n"
-                  "4. Try dev branch for test purposes (new features, etc): {0}/tree/dev"
-                  .format(url_github, url_wiki_base, url_tg_group, url_tg_channel)))
+            print(("Hi. You should provide at least three arguments.\nzbxtg.py [TO] [SUBJECT] [BODY]\n\n"))
         if not do_not_exit:
             sys.exit(0)
 
@@ -592,64 +533,8 @@ def main():
     zbx_subject = args[2]
     zbx_body = args[3]
 
-    tg = TelegramAPI(key=zbxtg_settings.tg_key)
-
-    tg.tmp_dir = tmp_dir
-    tg.tmp_uids = tmp_uids
-
-    if zbxtg_settings.proxy_to_tg:
-        proxy_to_tg = zbxtg_settings.proxy_to_tg
-        if not proxy_to_tg.find("http") and not proxy_to_tg.find("socks"):
-            proxy_to_tg = "https://" + proxy_to_tg
-        tg.proxies = {
-            "https": "{0}".format(proxy_to_tg),
-        }
-
-    zbx = ZabbixWeb(server=zbxtg_settings.zbx_server, username=zbxtg_settings.zbx_api_user,
-                    password=zbxtg_settings.zbx_api_pass)
-
-    zbx.tmp_dir = tmp_dir
-
-    # workaround for Zabbix 4.x
-    zbx_version = 3
-
-    try:
-        zbx_version = zbxtg_settings.zbx_server_version
-    except:
-        pass
-
-    if zbxtg_settings.proxy_to_zbx:
-        zbx.proxies = {
-            "http": "http://{0}/".format(zbxtg_settings.proxy_to_zbx),
-            "https": "https://{0}/".format(zbxtg_settings.proxy_to_zbx)
-        }
-
-    # https://github.com/ableev/Zabbix-in-Telegram/issues/55
-    try:
-        if zbxtg_settings.zbx_basic_auth:
-            zbx.basic_auth_user = zbxtg_settings.zbx_basic_auth_user
-            zbx.basic_auth_pass = zbxtg_settings.zbx_basic_auth_pass
-    except:
-        pass
-
-    try:
-        zbx_api_verify = zbxtg_settings.zbx_api_verify
-        zbx.verify = zbx_api_verify
-    except:
-        pass
-
-    map = Maps()
-    # api key to resolve address to coordinates via google api
-    try:
-        if zbxtg_settings.google_maps_api_key:
-            map.key = zbxtg_settings.google_maps_api_key
-        if zbxtg_settings.proxy_to_tg:
-            map.proxies = {
-                "http": "http://{0}/".format(zbxtg_settings.proxy_to_tg),
-                "https": "https://{0}/".format(zbxtg_settings.proxy_to_tg)
-            }
-    except:
-        pass
+    tg = TelegramAPI()
+    zbx = ZabbixWeb()
 
     zbxtg_body = (zbx_subject + "\n" + zbx_body).splitlines()
     zbxtg_body_text = []
@@ -695,7 +580,6 @@ def main():
         zbx.debug = True
         print_message(tg.get_me())
         print_message("Cache file with uids: " + tg.tmp_uids)
-        log_file = tmp_dir + ".debug." + hash_ts + ".log"
         #print_message(log_file)
 
     if "--markdown" in args or settings["markdown"]:
@@ -725,21 +609,14 @@ def main():
     if settings["lat"] > 0 and settings["lat"] > 0:
         location_coordinates = {"latitude": settings["lat"], "longitude": settings["lon"]}
         tg.location = location_coordinates
-    else:
-        if settings["location"]:
-            location_coordinates = map.get_coordinates_by_address(settings["location"])
-            if location_coordinates:
-                settings["lat"] = location_coordinates["latitude"]
-                settings["lon"] = location_coordinates["longitude"]
-                tg.location = location_coordinates
 
-    if not os.path.isdir(tmp_dir):
+    if not os.path.isdir(tg.tmp_dir):
         if is_debug:
             print_message("Tmp dir doesn't exist, creating new one...")
         try:
-            os.makedirs(tmp_dir)
+            os.makedirs(tg.tmp_dir)
             open(tg.tmp_uids, "a").close()
-            os.chmod(tmp_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
+            os.chmod(tg.tmp_dir, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
             os.chmod(tg.tmp_uids, stat.S_IRWXU | stat.S_IRWXG | stat.S_IRWXO)
         except:
             tmp_dir = "/tmp"
@@ -821,8 +698,8 @@ def main():
 
     # add signature, turned off by default, you can turn it on in config
     try:
-        if "--signature" in args or settings["signature"] or zbxtg_settings.zbx_tg_signature\
-                and not "--signature_disable" in args and not settings["signature_disable"]:
+        if "--signature" in args or settings["signature"] or zbxtg_settings.zbx_tg_signature \
+                and "--signature_disable" not in args and not settings["signature_disable"]:
             if "--signature" in args:
                 settings["signature"] = args[args.index("--signature") + 1]
             if not settings["signature"]:
@@ -858,9 +735,8 @@ def main():
 
             # another case if markdown is enabled and we got parse error, try to remove "bad" symbols from message
             if tg.markdown and tg.error.find("Can't find end of the entity starting at byte offset") > -1:
-                markdown_warning = "Original message has been fixed due to {0}. " \
-                                   "Please, fix the markdown, it's slowing down messages sending."\
-                    .format(url_wiki_base + "/" + settings_description["markdown"]["url"])
+                markdown_warning = "Original message has been fixed. " \
+                                   "Please, fix the markdown, it's slowing down messages sending."
                 markdown_fix_attempts = 0
                 while not tg.ok and markdown_fix_attempts != 3:
                     offset = re.search("Can't find end of the entity starting at byte offset ([0-9]+)", tg.error).group(1)
@@ -892,7 +768,7 @@ def main():
             if not settings["extimg"]:
                 zbxtg_file_img = zbx.graph_get(settings["zbxtg_itemid"], settings["zbxtg_image_period"],
                                                settings["zbxtg_title"], settings["zbxtg_image_width"],
-                                               settings["zbxtg_image_height"], version=zbx_version)
+                                               settings["zbxtg_image_height"], version=zbxtg_settings.zbx_version)
             else:
                 zbxtg_file_img = external_image_get(settings["extimg"], tmp_dir=zbx.tmp_dir)
             zbxtg_body_text, is_modified = list_cut(zbxtg_body_text, 200)
@@ -923,9 +799,7 @@ def main():
                     if tg.error.find("PHOTO_INVALID_DIMENSIONS") > -1:
                         if not tg.disable_web_page_preview:
                             tg.disable_web_page_preview = True
-                        text_warn = "Zabbix user couldn't get graph (probably has no rights to get data from host), " \
-                                    "check script manually, see {0}".format(url_wiki_base + "/" +
-                                                                            settings_description["graphs"]["url"])
+                        text_warn = "Zabbix user couldn't get graph (probably has no rights to get data from host), check script manually"
                         tg.send_message(uid, [text_warn])
                         print_message(text_warn)
     if tg.location and location_coordinates["latitude"] and location_coordinates["longitude"]:
