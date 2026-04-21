@@ -16,7 +16,7 @@ zbx_server = "http://127.0.0.1/zabbix/"  # zabbix server full url
 zbx_api_user = "tg_graph"
 zbx_api_pass = "zabbix.tg"
 
-zbx_version = 6
+zbx_version = 7
 
 zbx_basic_auth_user = "tg_graph"
 zbx_basic_auth_pass = "zabbix.tg"

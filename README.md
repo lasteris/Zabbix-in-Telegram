@@ -124,56 +124,37 @@ chmod 755 /var/tmp/zbxtg
 
 ---
 
-## Настройка Zabbix Web Interface
+## Настройка Zabbix Web UI
 
-### 1. Создание Media Type
+### Настройка Alerts → Media types → Telegram
 
-**Administration → Media types → Create media type**
+![alt text](image.png)
 
-см. `MediaTypeConfig.png`
+Расшифровка:
 
-| Поле | Значение |
-|------|----------|
-| Name | `Telegram via venv` |
-| Type | `Script` |
-| Script name | `zbxtg.sh` |
+group_name - Название группы, куда пишем алерты
 
-**Script parameters (3 параметра):**
+**Параметры скрипта (3 параметра):**
+
 | Параметр | Значение |
-|----------|----------|
-| Parameter 1 | `{ALERT.SENDTO}` |
+| ---------- | ---------- |
+| Parameter 1 | `group_name` |
 | Parameter 2 | `{ALERT.SUBJECT}` |
 | Parameter 3 | `{ALERT.MESSAGE}` |
 
-### 2. Настройка пользователя
+Далее, шаблоны сообщений:
 
-**Administration → Users** → выберите пользователя → вкладка **Media** → **Add**
-
-| Поле | Значение |
-|------|----------|
-| Type | `Telegram via venv` |
-| Send to | `group_name` |
-| When active | `1-7,00:00-24:00` |
-| Use if severity | `All` |
-
-### 3. Настройка Action
-
-**Configuration → Actions → Trigger actions** → **Create action**
-
-**Вкладка Actions:**
-- **Name:** `Telegram notifications`
-
-**Вкладка Operations:**
-- Нажмите **Add** → **Operation type:** `Send message`
-- **Send to users:** выберите вашего пользователя
+![alt text](image-1.png)
 
 **Для сообщения о проблеме (Problem):**
 см. /message_templates/Problem.md
 
-**Вкладка Recovery operations:**
+**Для сообщения о восстановлении после проблемы (Recovery):**
 см. /message_templates/Recovery.md
 
-Сохраните Action.
+>Внимание! Данные шаблоны включают в себя отображение графиков.
+
+**Сохраните изменения.**
 
 ---
 
@@ -197,7 +178,7 @@ chmod 755 /var/tmp/zbxtg
 
 ### Тест из веб-интерфейса
 
-1. **Administration → Media types** → `Telegram via venv`
+1. **Alerts → Media types** → `Telegram`
 2. Нажмите **Test**
 3. Введите:
    - **Send to:** `group_name`
@@ -212,13 +193,19 @@ chmod 755 /var/tmp/zbxtg
 ```bash
 # Лог Zabbix Server
 tail -f /var/log/zabbix/zabbix_server.log
+```
 
-# Лог скрипта
-tail -f /var/log/zabbix/zbxtg.log
+Если нужны отладочные логи:
 
+LOG_FILE - /var/log/zabbix/zbxtg.log
+
+```bash
 # Включение отладки в скрипте
 # Добавьте --debug в wrapper:
 exec "$VENV_PYTHON" "$ZBX_SCRIPT" "$@" --debug 2>> "$LOG_FILE"
+
+# Просмотр логов:
+tail -f /var/log/zabbix/zbxtg.log
 ```
 
 ---

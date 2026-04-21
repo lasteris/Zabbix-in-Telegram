@@ -294,7 +294,7 @@ class ZabbixWeb:
 
         self.cookie = cookie
 
-    def graph_get(self, itemid, period, title, width, height, version=3):
+    def graph_get(self, itemid, period, title, width, height, version=6):
         file_img = "{0}/{1}.png".format(self.tmp_dir,                                                   
                                         "".join(random.choice(string.ascii_letters) for e in range(10)))
 
@@ -320,10 +320,7 @@ class ZabbixWeb:
             zbx_img_url_itemids.append(itemid_url)
 
         zbx_img_url = self.server + "/chart3.php?"
-        if version < 4:
-            zbx_img_url += "period={0}".format(period)
-        else:
-            zbx_img_url += "from=now-{0}&to=now".format(period)
+        zbx_img_url += "from=now-{0}&to=now".format(period)
         zbx_img_url += "&name={0}&width={1}&height={2}&graphtype=0&legend=1".format(title, width, height)
         zbx_img_url += "".join(zbx_img_url_itemids)
 
