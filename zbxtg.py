@@ -24,7 +24,7 @@ class Cache:
 
 
 class TelegramAPI:
-    client: httpx.Client = httpx.Client(timeout=30, proxy=zbxtg_settings.proxy_to_tg)
+    client: httpx.Client = httpx.Client(timeout=30, proxy=zbxtg_settings.proxy_to_tg, verify=False)
     tg_url_bot_general = "https://api.telegram.org/bot"
     def http_get(self, url):
         answer = self.client.get(url)
